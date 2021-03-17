@@ -19,11 +19,17 @@ type GpiodPin struct {
 }
 
 func (gp GpiodPin) Input() {
-	gp.Reconfigure(gpiod.AsInput)
+	if err := gp.Reconfigure(gpiod.AsInput); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
 
 func (gp GpiodPin) Output() {
-	gp.Reconfigure(gpiod.AsOutput())
+	if err := gp.Reconfigure(gpiod.AsOutput()); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
 
 func (gp GpiodPin) High() {
