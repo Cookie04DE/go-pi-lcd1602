@@ -3,11 +3,8 @@ package lcd1602
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
-
-	rpio "github.com/stianeikeland/go-rpio"
 )
 
 const (
@@ -29,18 +26,16 @@ var lines = map[int]LineNumber{
 	2: LINE_2,
 }
 
-//global used to ensure the rpio library is nitialized befure using it.
-var rpioPrepared = false
-
 type LineNumber uint8
 
 type Character [8]uint8
 
 type LCD struct {
-	RS, E               rpio.Pin
-	DataPins            []rpio.Pin
+	RS, E               Pin
+	DataPins            []Pin
 	LineWidth           int
 	writelock, linelock sync.Mutex
+	pinProvider         PinProvider
 }
 
 type LCDI interface {
@@ -67,42 +62,38 @@ func SetCustomCharacters(l LCDI, characters []Character) {
 	}
 }
 
-//function should be called before executing any other code!
-func Open() {
-	if err := rpio.Open(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	rpioPrepared = true
-}
-
-func Close() {
-	if rpioPrepared {
-		rpio.Close()
-	}
-}
-
-func New(rs, e int, data []int, linewidth int) *LCD {
+func NewWithCustomPinProvider(rs, e int, data []int, linewidth int, pinProvider PinProvider) *LCD {
 
 	datalength := len(data)
 	if datalength != 4 && datalength != 8 {
 		errors.New("LCD requires four or eight datapins!")
 	}
 
-	datapins := make([]rpio.Pin, 0)
+	datapins := make([]Pin, 0)
+
+	pinProvider.Open() //This call needs to be here so we can get pins
 
 	for _, d := range data {
-		datapins = append(datapins, rpio.Pin(d))
+		datapins = append(datapins, pinProvider.GetPin(d))
 	}
 
 	l := &LCD{
-		RS:        rpio.Pin(rs),
-		E:         rpio.Pin(e),
-		DataPins:  datapins,
-		LineWidth: linewidth,
+		RS:          pinProvider.GetPin(rs),
+		E:           pinProvider.GetPin(e),
+		DataPins:    datapins,
+		LineWidth:   linewidth,
+		pinProvider: pinProvider,
 	}
 	l.initPins()
 	return l
+}
+
+func New(rs, e int, data []int, linewidth int) *LCD {
+	return NewWithCustomPinProvider(rs, e, data, linewidth, RpioProvider{})
+}
+
+func NewWithGpiod(rs, e int, data []int, linewidth int, chipName string) *LCD {
+	return NewWithCustomPinProvider(rs, e, data, linewidth, &GpiodProvider{chipName: chipName})
 }
 
 func (l *LCD) Close() {}
@@ -239,7 +230,7 @@ func (l *LCD) Reset() {
 }
 
 //setBitToPin function sets given pin to a bit value from a given data int
-func setBitToPin(pin rpio.Pin, data, position uint8) {
+func setBitToPin(pin Pin, data, position uint8) {
 	if data&position == position {
 		pin.High()
 	} else {
@@ -257,9 +248,6 @@ func (l *LCD) enable(executionTime time.Duration) {
 }
 
 func (l *LCD) initPins() {
-	if !rpioPrepared {
-		Open()
-	}
 	l.RS.Output()
 	l.E.Output()
 	for _, d := range l.DataPins {
